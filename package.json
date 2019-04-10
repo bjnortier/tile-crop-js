@@ -1,0 +1,44 @@
+{
+  "name": "tile-crop-js",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "lint": "standard",
+    "test:unit": "mocha --require @babel/register --recursive test/unit/*.js",
+    "test:unit:watch": "npm run test:unit -- --watch",
+    "test:functional": "cd test/functional && webpack-dev-server",
+    "test": "npm run lint && npm run test:unit",
+    "compile": "babel --optional runtime -d lib/ src/",
+    "dist": "mkdir -p dist && browserify lib/index.js --standalone dxf -o dist/dxf.js",
+    "prepublishOnly": "rimraf dist/ lib/ && npm run compile && npm run dist"
+  },
+  "author": "Ben Nortier <ben@bjnortier.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@turf/boolean-point-in-polygon": "^6.0.1",
+    "pngjs": "^3.4.0",
+    "vecks": "^3.8.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.4.3",
+    "@babel/polyfill": "^7.4.3",
+    "@babel/preset-env": "^7.4.3",
+    "@babel/register": "^7.4.0",
+    "expect": "^24.7.1",
+    "mocha": "^6.1.2",
+    "standard": "^12.0.1"
+  },
+  "standard": {
+    "globals": [
+      "describe",
+      "it",
+      "before",
+      "beforeEach",
+      "after"
+    ],
+    "ignore": [
+      "lib/"
+    ]
+  }
+}
