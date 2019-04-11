@@ -17,8 +17,8 @@
   "license": "MIT",
   "dependencies": {
     "@turf/boolean-point-in-polygon": "^6.0.1",
-    "pngjs": "^3.4.0",
-    "vecks": "^3.8.0"
+    "jimp": "^0.6.1",
+    "vecks": "^3.8.2"
   },
   "devDependencies": {
     "@babel/core": "^7.4.3",

@@ -1,16 +1,6 @@
-import { PNG } from 'pngjs'
-import { Box2 } from 'vecks'
+import { Box2, V2 } from 'vecks'
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
-
-const parsePNG = data => {
-  return new Promise((resolve, reject) => {
-    const _png = new PNG({ filterType: 4 })
-      .parse(data)
-      .on('parsed', () => {
-        resolve(_png)
-      })
-  })
-}
+import Jimp from 'jimp'
 
 export const collectTiles = async (inputTiles) => {
   if (!inputTiles.length) {
@@ -27,17 +17,17 @@ export const collectTiles = async (inputTiles) => {
   }
   for (let i = 0; i < inputTiles.length; ++i) {
     const inputTile = inputTiles[i]
-    const parsedPNG = await parsePNG(inputTile.bytes)
-    const currentTileWidthCoords = inputTile.bbox.max.x - inputTile.bbox.min.x
-    const currentTileHeightCoords = inputTile.bbox.max.y - inputTile.bbox.min.y
+    const parsedPNG = await Jimp.read(inputTile.bytes)
+    const currentTileWidthCoords = inputTile.bbox.width
+    const currentTileHeightCoords = inputTile.bbox.height
     if (i === 0) {
-      tileWidthPX = parsedPNG.width
-      tileHeightPX = parsedPNG.height
+      tileWidthPX = parsedPNG.bitmap.width
+      tileHeightPX = parsedPNG.bitmap.height
       tileWidthCoords = currentTileWidthCoords
       tileHeightCoords = currentTileHeightCoords
     } else {
-      if ((parsedPNG.width !== tileWidthPX) || (parsedPNG.height !== tileHeightPX)) {
-        throw Error(`tile at index ${i} has different pixel dimensions (${parsedPNG.width}, ${parsedPNG.height}) to the first tile (${tileWidthPX}, ${tileHeightPX})`)
+      if ((parsedPNG.bitmap.width !== tileWidthPX) || (parsedPNG.bitmap.height !== tileHeightPX)) {
+        throw Error(`tile at index ${i} has different pixel dimensions (${parsedPNG.bitmap.width}, ${parsedPNG.bitmap.height}) to the first tile (${tileWidthPX}, ${tileHeightPX})`)
       }
       if ((currentTileWidthCoords !== tileWidthCoords) || (currentTileHeightCoords !== tileHeightCoords)) {
         throw Error(`tile at index ${i} has different coordinate dimensions (${currentTileWidthCoords}, ${currentTileHeightCoords}) to the first tile (${tileWidthCoords}, ${tileHeightCoords})`)
@@ -52,50 +42,79 @@ export const collectTiles = async (inputTiles) => {
   }
   result.tileWidthPX = tileWidthPX
   result.tileHeightPX = tileHeightPX
-  result.requiredImageWidth = Math.round((result.bbox.max.x - result.bbox.min.x) / tileWidthCoords) * tileWidthPX
-  result.requiredImageHeight = Math.round((result.bbox.max.y - result.bbox.min.y) / tileHeightCoords) * tileHeightPX
+  result.outputImageWidth = Math.round((result.bbox.width) / tileWidthCoords) * tileWidthPX
+  result.outputImageHeight = Math.round((result.bbox.height) / tileHeightCoords) * tileHeightPX
   return result
 }
 
-export const createCroppedPNG = async (collectedTiles, geometry) => {
-  var outputPNG = new PNG({
-    width: collectedTiles.requiredImageWidth,
-    height: collectedTiles.requiredImageHeight,
-    colorType: 6
-  })
-  for (let i = 0; i < outputPNG.width * outputPNG.height; ++i) {
-    // outputPNG.data[i * 4] = 255
-    outputPNG.data[i * 4 + 3] = 0
-  }
-
-  for (let i = 0; i < collectedTiles.tiles.length; ++i) {
-    const inputPNG = collectedTiles.tiles[i].parsedPNG
-    const inputBBox = collectedTiles.tiles[i].bbox
-    const tileStartXPixel = inputBBox.min.x / (collectedTiles.bbox.max.x - collectedTiles.bbox.min.x) * collectedTiles.requiredImageWidth
-    const tileStartYPixel = inputBBox.min.y / (collectedTiles.bbox.max.y - collectedTiles.bbox.min.y) * collectedTiles.requiredImageHeight
-    for (var y = 0; y < inputPNG.height; y++) {
-      for (var x = 0; x < inputPNG.width; x++) {
-        const pixelX = tileStartXPixel + x
-        const pixelY = tileStartYPixel + y
-        const idx = pixelX + pixelY * collectedTiles.requiredImageWidth
-
-        const coordinate = [
-          pixelX / collectedTiles.requiredImageWidth * (collectedTiles.bbox.max.x - collectedTiles.bbox.min.x) + collectedTiles.bbox.min.x + ((collectedTiles.bbox.max.x - collectedTiles.bbox.min.x) / collectedTiles.requiredImageWidth / 2),
-          collectedTiles.bbox.max.y - pixelY / collectedTiles.requiredImageHeight * (collectedTiles.bbox.max.y - collectedTiles.bbox.min.y) - ((collectedTiles.bbox.max.y - collectedTiles.bbox.min.y) / collectedTiles.requiredImageHeight / 2)
-        ]
-
-        const inside = booleanPointInPolygon(coordinate, geometry)
-        const idx2 = (inputPNG.width * y + x) << 2
-        outputPNG.data[(idx << 2) + 0] = inputPNG.data[idx2]
-        outputPNG.data[(idx << 2) + 1] = inputPNG.data[idx2 + 1]
-        outputPNG.data[(idx << 2) + 2] = inputPNG.data[idx2 + 2]
-        if (inside) {
-          outputPNG.data[(idx << 2) + 3] = 255
-        } else {
-          outputPNG.data[(idx << 2) + 3] = 0
-        }
+const createImage = (width, height) => {
+  return new Promise((resolve, reject) => {
+    return new Jimp(width, height, 0x00000000, (err, img) => {
+      if (err) {
+        reject(err)
+      } else {
+        resolve(img)
       }
-    }
+    })
+  })
+}
+
+const getGeometryBBox = (geometry) => {
+  return geometry.coordinates.reduce((acc, coordinateSet) => {
+    return coordinateSet.reduce((acc, coordinate) => {
+      return acc.expandByPoint(new V2(coordinate[0], coordinate[1]))
+    }, acc)
+  }, new Box2())
+}
+
+export const createCroppedImage = async (collected, geometry) => {
+  const outputImage = await createImage(collected.outputImageWidth, collected.outputImageHeight)
+  for (let i = 0; i < collected.tiles.length; ++i) {
+    const inputPNG = collected.tiles[i].parsedPNG
+    const inputBBox = collected.tiles[i].bbox
+    const tileStartXPixel = (inputBBox.min.x - collected.bbox.min.x) / (collected.bbox.width) * collected.outputImageWidth
+    const tileStartYPixel = -(inputBBox.max.y - collected.bbox.max.y) / (collected.bbox.height) * collected.outputImageHeight
+    outputImage.blit(inputPNG, tileStartXPixel, tileStartYPixel)
   }
-  return PNG.sync.write(outputPNG)
+  const geometryBBox = getGeometryBBox(geometry)
+
+  // Crop pixels
+  const minX = Math.floor((geometryBBox.min.x - collected.bbox.min.x) / collected.bbox.width * collected.outputImageWidth)
+  const maxX = Math.ceil((geometryBBox.max.x - collected.bbox.min.x) / collected.bbox.width * collected.outputImageWidth)
+  const minY = Math.floor(-(geometryBBox.max.y - collected.bbox.max.y) / collected.bbox.height * collected.outputImageHeight)
+  const maxY = Math.ceil(-(geometryBBox.min.y - collected.bbox.max.y) / collected.bbox.height * collected.outputImageHeight)
+
+  // Recalculate the output coordinates bbox before cropping
+  // as we have rounded the pixels the resulting bounding box
+  // is slightly larger than the one for the boundary.
+  const outputBBox = new Box2(
+    new V2(
+      collected.bbox.min.x + minX / outputImage.bitmap.width * collected.bbox.width,
+      collected.bbox.max.y - maxY / outputImage.bitmap.height * collected.bbox.height),
+    new V2(
+      collected.bbox.min.x + maxX / outputImage.bitmap.width * collected.bbox.width,
+      collected.bbox.max.y - minY / outputImage.bitmap.height * collected.bbox.height))
+
+  outputImage.crop(minX, minY, maxX - minX, maxY - minY)
+  const outputWidth = outputImage.bitmap.width
+  const outputHeight = outputImage.bitmap.height
+  outputImage.scan(0, 0, outputWidth, outputHeight, (pixelX, pixelY, index) => {
+    // Don't bother with pixel that have not been copied from an image,
+    // e.g. in the case of disjointed tiles
+    if (outputImage.bitmap.data[index + 3] === 0) {
+      return
+    }
+
+    const coordinate = [
+      pixelX / outputWidth * outputBBox.width + outputBBox.min.x + (outputBBox.width / outputWidth / 2),
+      outputBBox.max.y - pixelY / outputHeight * outputBBox.height - (outputBBox.height / outputHeight / 2)
+    ]
+    const inside = booleanPointInPolygon(coordinate, geometry)
+    if (!inside) {
+      outputImage.bitmap.data[index + 3] = 0
+    }
+  })
+  // console.log(`[${i}/${collected.tiles.length}]`)
+
+  return outputImage
 }
